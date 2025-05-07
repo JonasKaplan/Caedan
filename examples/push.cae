@@ -1,0 +1,5 @@
+proc push: ^push>&push<
+    region push: [1]
+
+proc main: "30push>.
+    region main: [2]
