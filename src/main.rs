@@ -11,6 +11,6 @@ use std::path::PathBuf;
 use program::Program;
 
 fn main() {
-    let program: Program = Program::from_source(&PathBuf::from("examples/push.cae")).unwrap();
+    let program: Program = Program::from_source(&PathBuf::from("examples/zero.cae")).unwrap();
     program.run();
 }

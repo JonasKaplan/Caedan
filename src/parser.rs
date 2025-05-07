@@ -19,6 +19,7 @@ pub enum ParseError {
 pub enum ParsedInstruction {
     Right,
     Left,
+    Reset,
     Plus,
     Minus,
     LoopStart,
@@ -96,6 +97,7 @@ fn is_instruction_char(c: char) -> bool {
         is_identifier_char(c) ||
         (c == '>') ||
         (c == '<') ||
+        (c == '~') ||
         (c == '+') ||
         (c == '-') ||
         (c == '[') ||
@@ -169,6 +171,7 @@ fn parse_instruction(iterator: &mut Peekable<Chars>) -> Result<ParsedInstruction
     match instruction {
         '>' => return Ok(ParsedInstruction::Right),
         '<' => return Ok(ParsedInstruction::Left),
+        '~' => return Ok(ParsedInstruction::Reset),
         '+' => return Ok(ParsedInstruction::Plus),
         '-' => return Ok(ParsedInstruction::Minus),
         '[' => return Ok(ParsedInstruction::LoopStart),

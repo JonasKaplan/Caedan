@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 #[derive(Debug)]
 pub struct Region {
     pub name: String,
-    bytes: Vec<u8>,
+    bytes: Box<[u8]>,
     pointer: usize,
 }
 
@@ -11,7 +11,7 @@ impl Region {
     pub fn new(name: &str, size: NonZeroUsize) -> Region {
         return Region {
             name: String::from(name),
-            bytes: vec![0; size.get()],
+            bytes: vec![0; size.get()].into_boxed_slice(),
             pointer: 0,
         };
     }

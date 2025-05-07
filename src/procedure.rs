@@ -6,6 +6,7 @@ use crate::{parser::ParsedInstruction, program::Call, region::Region};
 pub enum Instruction {
     Right,
     Left,
+    Reset,
     Plus,
     Minus,
     LoopStart(usize),
@@ -62,6 +63,7 @@ impl Procedure {
             match instruction {
                 ParsedInstruction::Right => instructions.push(Instruction::Right),
                 ParsedInstruction::Left => instructions.push(Instruction::Left),
+                ParsedInstruction::Reset => instructions.push(Instruction::Reset),
                 ParsedInstruction::Plus => instructions.push(Instruction::Plus),
                 ParsedInstruction::Minus => instructions.push(Instruction::Minus),
                 ParsedInstruction::LoopStart => instructions.push(Instruction::LoopStart(find_forwards(&parsed_instructions, i))),
@@ -100,6 +102,7 @@ impl Procedure {
             match &self.instructions[pointer] {
                 Instruction::Right => region.right(),
                 Instruction::Left => region.left(),
+                Instruction::Reset => region.jump(0, 0),
                 Instruction::Plus => region.set(u8::wrapping_add(region.get(), 1)),
                 Instruction::Minus => region.set(u8::wrapping_sub(region.get(), 1)),
                 Instruction::Read => {
