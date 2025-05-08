@@ -1,5 +1,7 @@
 use std::{collections::HashSet, fs::File, io::{BufRead, BufReader}, iter::Peekable, num::NonZeroUsize, path::Path, str::{Chars, FromStr}};
 
+use crate::procedure::CalledRegion;
+
 #[derive(Debug)]
 pub enum ParseError {
     BadData,
@@ -29,7 +31,7 @@ pub enum ParsedInstruction {
     Quote(u8),
     Send(String),
     Receive(String),
-    Call(String, Option<String>),
+    Call(String, CalledRegion),
 }
 
 enum LineType {
@@ -47,6 +49,7 @@ pub struct ParsedRegion {
 
 pub struct ParsedProcedure {
     pub name: String,
+    pub is_anonymous: bool,
     pub instructions: Vec<ParsedInstruction>,
 }
 
@@ -76,8 +79,8 @@ impl ParsedProcedure {
         for instruction in &self.instructions {
             match instruction {
                 ParsedInstruction::Send(region) => references.push(ReferencedItem::Region(region)),
-                ParsedInstruction::Call(procedure, None) => references.push(ReferencedItem::Procedure(procedure)),
-                ParsedInstruction::Call(procedure, Some(region)) => {
+                ParsedInstruction::Call(procedure, CalledRegion::Undefined) => references.push(ReferencedItem::Procedure(procedure)),
+                ParsedInstruction::Call(procedure, CalledRegion::Defined(region)) => {
                     references.push(ReferencedItem::Procedure(procedure));
                     references.push(ReferencedItem::Region(region));
                 },
@@ -159,6 +162,23 @@ fn parse_number<T: FromStr>(iterator: &mut Peekable<Chars>) -> Result<T, ParseEr
     return text.parse::<T>().map_err(|_| ParseError::MalformedNumber);
 }
 
+fn parse_called_region(iterator: &mut Peekable<Chars>) -> Result<CalledRegion, ParseError> {
+    let mut region: CalledRegion = CalledRegion::Undefined;
+    match iterator.peek() {
+        Some('$') => {
+            _ = iterator.next();
+            region = CalledRegion::BackReference;
+        },
+        Some('@') => {
+            _ = iterator.next();
+            skip_whitespace(iterator);
+            region = CalledRegion::Defined(parse_identifier(iterator)?);
+        },
+        _ => {},
+    }
+    return Ok(region);
+}
+
 fn parse_instruction(iterator: &mut Peekable<Chars>) -> Result<ParsedInstruction, ParseError> {
     // I cannot express how much I hate this syntax
     let instruction: char = match iterator.peek() {
@@ -195,14 +215,8 @@ fn parse_instruction(iterator: &mut Peekable<Chars>) -> Result<ParsedInstruction
         '&' => return Ok(ParsedInstruction::Receive(parse_identifier(iterator)?)),
         _ => {
             let procedure: String = parse_identifier(iterator)?;
-            let mut region: Option<String> = None;
             skip_whitespace(iterator);
-            if iterator.peek() == Option::Some(&'@') {
-                _ = iterator.next();
-                skip_whitespace(iterator);
-                region = Some(parse_identifier(iterator)?);
-            }
-            return Ok(ParsedInstruction::Call(procedure, region));
+            return Ok(ParsedInstruction::Call(procedure, parse_called_region(iterator)?));
         },
     }
 }
@@ -228,13 +242,8 @@ fn parse_instruction_list(iterator: &mut Peekable<Chars>, name: &str) -> Result<
                 let anonymous_name = make_anonymous_name(name, anonymous_count);
                 anonymous_procedures.append(&mut parse_instruction_list(iterator, &anonymous_name)?);
                 _ = iterator.next();
-                let mut region: Option<String> = None;
                 skip_whitespace(iterator);
-                if iterator.peek() == Option::Some(&'@') {
-                    _ = iterator.next();
-                    region = Some(parse_identifier(iterator)?);
-                }
-                instructions.push(ParsedInstruction::Call(anonymous_name, region));
+                instructions.push(ParsedInstruction::Call(anonymous_name, parse_called_region(iterator)?));
             },
             Some(c) if *c != ')' => return Err(ParseError::MalformedProcedureDeclaration),
             _ => break,
@@ -276,8 +285,10 @@ fn parse_procedure(line: &str) -> Result<Vec<ParsedProcedure>, ParseError> {
     expect_keyword(&mut iterator, ":")?;
     let all_procedures: Vec<(String, Vec<ParsedInstruction>)> = parse_instruction_list(&mut iterator, &name)?;
     for (name, instructions) in all_procedures.into_iter() {
-        procedures.push(ParsedProcedure { name, instructions });
+        procedures.push(ParsedProcedure { name, instructions, is_anonymous: true });
     }
+    // There is always at least one element
+    procedures.last_mut().unwrap().is_anonymous = false;
     if iterator.peek().is_some() {
         return Err(ParseError::MalformedProcedureDeclaration);
     }

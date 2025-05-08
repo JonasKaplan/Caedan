@@ -2,6 +2,13 @@ use std::{cell::RefCell, collections::HashMap, io::{self, Read, Write}};
 
 use crate::{parser::ParsedInstruction, program::Call, region::Region};
 
+#[derive(Debug, Clone)]
+pub enum CalledRegion {
+    Undefined,
+    BackReference,
+    Defined(String),
+}
+
 #[derive(Debug)]
 pub enum Instruction {
     Right,
@@ -16,12 +23,13 @@ pub enum Instruction {
     Quote(u8),
     Send(String),
     Receive(String),
-    Call(String, Option<String>),
+    Call(String, CalledRegion),
 }
 
 #[derive(Debug)]
 pub struct Procedure {
     pub name: String,
+    pub is_anonymous: bool,
     instructions: Vec<Instruction>,
 }
 
@@ -57,7 +65,7 @@ fn find_backwards(instructions: &[ParsedInstruction], starting_point: usize) -> 
 
 
 impl Procedure {
-    pub fn new(name: &str, parsed_instructions: Vec<ParsedInstruction>) -> Procedure {
+    pub fn new(name: &str, parsed_instructions: Vec<ParsedInstruction>, is_anonymous: bool) -> Procedure {
         let mut instructions: Vec<Instruction> = Vec::new();
         for (i, instruction) in parsed_instructions.iter().enumerate() {
             match instruction {
@@ -78,11 +86,12 @@ impl Procedure {
         }
         return Procedure {
             name: name.to_string(),
+            is_anonymous,
             instructions,
         }
     }
 
-    pub fn execute(&self, region: &mut Region, mut pointer: usize, regions: &HashMap<String, RefCell<Region>>) -> Option<Call> {
+    pub fn execute(&self, region: &mut Region, mut pointer: usize, regions: &HashMap<String, RefCell<Region>>, back_reference: &str) -> Option<Call> {
         //println!("{} @ {}", self.name, region.name);
         if (pointer == 0) && (self.instructions.is_empty()) {
             return None;
@@ -106,9 +115,9 @@ impl Procedure {
             match &self.instructions[pointer] {
                 Instruction::Right => region.right(),
                 Instruction::Left => region.left(),
-                Instruction::Reset => region.jump(0, 0),
-                Instruction::Plus => region.set(u8::wrapping_add(region.get(), 1)),
-                Instruction::Minus => region.set(u8::wrapping_sub(region.get(), 1)),
+                Instruction::Reset => region.goto(0),
+                Instruction::Plus => region.increment(),
+                Instruction::Minus => region.decrement(),
                 Instruction::Read => {
                     let mut buf: [u8; 1] = [0; 1];
                     // No reason not to just panic if this fails, so the unwrap stays
@@ -128,14 +137,21 @@ impl Procedure {
                         region.set(reference.get());
                     }
                 },
-                Instruction::Call(procedure_name, None) => {
+                Instruction::Call(procedure_name, CalledRegion::Undefined) => {
                     return Some(Call {
                         procedure: procedure_name.to_string(),
                         region: region.name.to_string(),
                         return_pointer,
                     });
                 },
-                Instruction::Call(procedure_name, Some(region_name)) => {
+                Instruction::Call(procedure_name, CalledRegion::BackReference) => {
+                    return Some(Call {
+                        procedure: procedure_name.to_string(),
+                        region: back_reference.to_string(),
+                        return_pointer,
+                    });
+                },
+                Instruction::Call(procedure_name, CalledRegion::Defined(region_name)) => {
                     return Some(Call {
                         procedure: procedure_name.to_string(),
                         region: region_name.to_string(),

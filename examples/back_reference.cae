@@ -1,0 +1,6 @@
+region other[1]
+region other2[2]
+region other3[3]
+
+proc main: (((("30)$)@other3)@other2)@other.
+    region main[1]

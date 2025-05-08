@@ -16,20 +16,24 @@ impl Region {
         };
     }
 
-    pub fn jump(&mut self, location: usize, fallback: usize) -> () {
-        if location >= self.bytes.len() {
-            self.pointer = fallback;
+    pub fn right(&mut self) -> () {
+        if self.pointer == (self.bytes.len() - 1) {
+            self.pointer = 0;
         } else {
-            self.pointer = location;
+            self.pointer += 1;
         }
     }
 
-    pub fn right(&mut self) -> () {
-        self.jump(usize::wrapping_add(self.pointer, 1), 0);
+    pub fn left(&mut self) -> () {
+        if self.pointer == 0 {
+            self.pointer = self.bytes.len() - 1;
+        } else {
+            self.pointer -= 1;
+        }
     }
 
-    pub fn left(&mut self) -> () {
-        self.jump(usize::wrapping_sub(self.pointer, 1), usize::wrapping_sub(self.bytes.len(), 1));
+    pub fn goto(&mut self, location: usize) -> () {
+        self.pointer = location;
     }
 
     pub fn get(&self) -> u8 {
@@ -38,5 +42,13 @@ impl Region {
 
     pub fn set(&mut self, value: u8) -> () {
         self.bytes[self.pointer] = value;
+    }
+
+    pub fn increment(&mut self) -> () {
+        self.bytes[self.pointer] = u8::wrapping_add(self.bytes[self.pointer], 1);
+    }
+
+    pub fn decrement(&mut self) -> () {
+        self.bytes[self.pointer] = u8::wrapping_sub(self.bytes[self.pointer], 1);
     }
 }
