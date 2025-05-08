@@ -1,6 +1,7 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::unused_unit)]
 
+mod char_stream;
 mod procedure;
 mod region;
 mod program;

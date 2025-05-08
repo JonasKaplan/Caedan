@@ -65,4 +65,12 @@ proc very_happy: "3A."29.
 proc blah: (very_happy$)@foreign
 ```
 
-The bytes in `very_happy` will always be written to the region the procedure was invoked for.
+The bytes in `very_happy` will always be written to the region the procedure was invoked for. This enables much easier constructs around loops. As an example
+
+```cae
+region loop_flag[1]
+proc do_stuff: "00
+proc loop: ("01[do_stuff$])@loop_flag
+```
+
+The `do_stuff` procedure could be anything. It will execute repeatedly until the loop flag is set back to 0.

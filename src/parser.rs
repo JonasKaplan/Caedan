@@ -1,16 +1,15 @@
-use std::{collections::HashSet, fs::File, io::{BufRead, BufReader}, iter::Peekable, num::NonZeroUsize, path::Path, str::{Chars, FromStr}};
+use std::{collections::HashSet, fs::File, num::NonZeroUsize, path::Path, str::FromStr};
 
-use crate::procedure::CalledRegion;
+use crate::{char_stream::CharStream, procedure::RegionReference};
 
 #[derive(Debug)]
 pub enum ParseError {
-    BadData,
     DuplicateIdentifier,
+    InvalidIdentifier,
     MalformedInstruction,
     MalformedLine,
     MalformedNumber,
     MalformedProcedureDeclaration,
-    MalformedRegionDeclaration,
     MissingFile,
     MissingIdentifier,
     MissingKeyword,
@@ -29,17 +28,9 @@ pub enum ParsedInstruction {
     Read,
     Write,
     Quote(u8),
-    Send(String),
-    Receive(String),
-    Call(String, CalledRegion),
-}
-
-enum LineType {
-    Region,
-    Procedure,
-    Comment,
-    Whitespace,
-    Err,
+    Send(RegionReference),
+    Receive(RegionReference),
+    Call(String, Option<RegionReference>),
 }
 
 pub struct ParsedRegion {
@@ -59,6 +50,7 @@ pub struct ParseResult {
     pub procedures: Vec<ParsedProcedure>,
 }
 
+#[derive(Debug)]
 pub enum ReferencedItem<'a> {
     Procedure(&'a str),
     Region(&'a str),
@@ -78,9 +70,10 @@ impl ParsedProcedure {
         let mut references: Vec<ReferencedItem> = Vec::new();
         for instruction in &self.instructions {
             match instruction {
-                ParsedInstruction::Send(region) => references.push(ReferencedItem::Region(region)),
-                ParsedInstruction::Call(procedure, CalledRegion::Undefined) => references.push(ReferencedItem::Procedure(procedure)),
-                ParsedInstruction::Call(procedure, CalledRegion::Defined(region)) => {
+                ParsedInstruction::Send(RegionReference::Named(region)) => references.push(ReferencedItem::Region(region)),
+                ParsedInstruction::Receive(RegionReference::Named(region)) => references.push(ReferencedItem::Region(region)),
+                ParsedInstruction::Call(procedure, None) => references.push(ReferencedItem::Procedure(procedure)),
+                ParsedInstruction::Call(procedure, Some(RegionReference::Named(region))) => {
                     references.push(ReferencedItem::Procedure(procedure));
                     references.push(ReferencedItem::Region(region));
                 },
@@ -112,32 +105,41 @@ fn is_instruction_char(c: char) -> bool {
         (c == '&');
 }
 
-fn skip_whitespace(iterator: &mut Peekable<Chars>) -> () {
+fn skip_whitespace(stream: &mut CharStream<File>) -> () {
     loop {
-        match iterator.peek() {
-            Some(c) if c.is_whitespace() => _ = iterator.next(),
+        match stream.peek() {
+            Some(c) if c.is_whitespace() => stream.advance(),
             _ => break,
         }
     }
 }
 
-fn expect_keyword(iterator: &mut Peekable<Chars>, keyword: &str) -> Result<(), ParseError> {
+fn skip_comment(stream: &mut CharStream<File>) -> () {
+    loop {
+        match stream.peek() {
+            Some('\n') | None => break,
+            _ => stream.advance(),
+        }
+    }
+    stream.advance();
+}
+
+fn expect_keyword(stream: &mut CharStream<File>, keyword: &str) -> Result<(), ParseError> {
     for keyword_c in keyword.chars() {
-        match iterator.peek() {
-            Some(c) if *c == keyword_c => _ = iterator.next(),
-            _ => return Err(ParseError::MissingKeyword),
+        if stream.next().ok_or(ParseError::MissingKeyword)? != keyword_c {
+            return Err(ParseError::MissingKeyword);
         }
     }
     return Ok(());
 }
 
-fn parse_identifier(iterator: &mut Peekable<Chars>) -> Result<String, ParseError> {
+fn parse_identifier(stream: &mut CharStream<File>) -> Result<String, ParseError> {
     let mut identifier = String::new();
     loop {
-        match iterator.peek() {
-            Some(c) if is_identifier_char(*c) => {
-                identifier.push(*c);
-                _ = iterator.next();
+        match stream.peek() {
+            Some(c) if is_identifier_char(c) => {
+                identifier.push(c);
+                stream.advance();
             },
             _ => break,
         }
@@ -145,16 +147,19 @@ fn parse_identifier(iterator: &mut Peekable<Chars>) -> Result<String, ParseError
     if identifier.is_empty() {
         return Err(ParseError::MissingIdentifier);
     }
+    if (identifier == "proc") || (identifier == "region") {
+        return Err(ParseError::InvalidIdentifier);
+    }
     return Ok(identifier);
 }
 
-fn parse_number<T: FromStr>(iterator: &mut Peekable<Chars>) -> Result<T, ParseError> {
+fn parse_number<T: FromStr>(stream: &mut CharStream<File>) -> Result<T, ParseError> {
     let mut text = String::new();
     loop {
-        match iterator.peek() {
+        match stream.peek() {
             Some(c) if c.is_numeric() => {
-                text.push(*c);
-                _ = iterator.next();
+                text.push(c);
+                stream.advance();
             },
             _ => break,
         }
@@ -162,31 +167,23 @@ fn parse_number<T: FromStr>(iterator: &mut Peekable<Chars>) -> Result<T, ParseEr
     return text.parse::<T>().map_err(|_| ParseError::MalformedNumber);
 }
 
-fn parse_called_region(iterator: &mut Peekable<Chars>) -> Result<CalledRegion, ParseError> {
-    let mut region: CalledRegion = CalledRegion::Undefined;
-    match iterator.peek() {
+fn parse_region_reference(stream: &mut CharStream<File>) -> Result<RegionReference, ParseError> {
+    match stream.peek() {
         Some('$') => {
-            _ = iterator.next();
-            region = CalledRegion::BackReference;
+            stream.advance();
+            return Ok(RegionReference::BackReference);
         },
-        Some('@') => {
-            _ = iterator.next();
-            skip_whitespace(iterator);
-            region = CalledRegion::Defined(parse_identifier(iterator)?);
-        },
-        _ => {},
+        Some(_) => {
+            return Ok(RegionReference::Named(parse_identifier(stream)?));
+        }
+        _ => return Err(ParseError::MissingIdentifier),
     }
-    return Ok(region);
 }
 
-fn parse_instruction(iterator: &mut Peekable<Chars>) -> Result<ParsedInstruction, ParseError> {
-    // I cannot express how much I hate this syntax
-    let instruction: char = match iterator.peek() {
-        Some(c) => *c,
-        None => return Err(ParseError::MalformedInstruction),
-    };
+fn parse_instruction(stream: &mut CharStream<File>) -> Result<ParsedInstruction, ParseError> {
+    let instruction: char = stream.peek().ok_or(ParseError::MalformedInstruction)?;
     if !is_identifier_char(instruction) {
-        _ = iterator.next();
+        stream.advance();
     }
     match instruction {
         '>' => return Ok(ParsedInstruction::Right),
@@ -201,22 +198,32 @@ fn parse_instruction(iterator: &mut Peekable<Chars>) -> Result<ParsedInstruction
         '"' => {
             let mut buf = String::new();
             for _ in 0..2 {
-                match iterator.next() {
+                match stream.next() {
                     Some(c) => buf.push(c),
                     None => return Err(ParseError::MalformedInstruction),
                 }
             }
-            match u8::from_str_radix(&buf, 16) {
-                Ok(value) => return Ok(ParsedInstruction::Quote(value)),
-                Err(_) => return Err(ParseError::MalformedInstruction),
+            if let Ok(value) = u8::from_str_radix(&buf, 16) {
+                return Ok(ParsedInstruction::Quote(value));
+            } else {
+                return Err(ParseError::MalformedInstruction);
             }
         },
-        '^' => return Ok(ParsedInstruction::Send(parse_identifier(iterator)?)),
-        '&' => return Ok(ParsedInstruction::Receive(parse_identifier(iterator)?)),
+        '^' => {
+            skip_whitespace(stream);
+            return Ok(ParsedInstruction::Send(parse_region_reference(stream)?));
+        },
+        '&' => {
+            skip_whitespace(stream);
+            return Ok(ParsedInstruction::Receive(parse_region_reference(stream)?));
+        },
         _ => {
-            let procedure: String = parse_identifier(iterator)?;
-            skip_whitespace(iterator);
-            return Ok(ParsedInstruction::Call(procedure, parse_called_region(iterator)?));
+            let procedure: String = parse_identifier(stream)?;
+            skip_whitespace(stream);
+            match stream.peek() {
+                Some('@') => return Ok(ParsedInstruction::Call(procedure, Some(parse_region_reference(stream)?))),
+                _ => return Ok(ParsedInstruction::Call(procedure, None)),
+            }
         },
     }
 }
@@ -228,24 +235,28 @@ fn make_anonymous_name(base_name: &str, anonymous_count: usize) -> String {
     return name;
 }
 
-fn parse_instruction_list(iterator: &mut Peekable<Chars>, name: &str) -> Result<Vec<(String, Vec<ParsedInstruction>)>, ParseError> {
+fn parse_instruction_list(stream: &mut CharStream<File>, name: &str) -> Result<Vec<(String, Vec<ParsedInstruction>)>, ParseError> {
     let mut anonymous_count: usize = 0;
     let mut anonymous_procedures: Vec<(String, Vec<ParsedInstruction>)> = Vec::new();
     let mut instructions: Vec<ParsedInstruction> = Vec::new();
     loop {
-        skip_whitespace(iterator);
-        match iterator.peek() {
-            Some(c) if is_instruction_char(*c) => instructions.push(parse_instruction(iterator)?),
-            Some(c) if *c == '(' => {
-                _ = iterator.next();
+        skip_whitespace(stream);
+        match stream.peek() {
+            Some(c) if is_instruction_char(c) => instructions.push(parse_instruction(stream)?),
+            Some('(') => {
+                stream.advance();
                 anonymous_count += 1;
                 let anonymous_name = make_anonymous_name(name, anonymous_count);
-                anonymous_procedures.append(&mut parse_instruction_list(iterator, &anonymous_name)?);
-                _ = iterator.next();
-                skip_whitespace(iterator);
-                instructions.push(ParsedInstruction::Call(anonymous_name, parse_called_region(iterator)?));
+                anonymous_procedures.append(&mut parse_instruction_list(stream, &anonymous_name)?);
+                stream.advance();
+                skip_whitespace(stream);
+                match stream.peek() {
+                    Some('@') => instructions.push(ParsedInstruction::Call(anonymous_name, Some(parse_region_reference(stream)?))),
+                    _ => instructions.push(ParsedInstruction::Call(anonymous_name, None)),
+                }
             },
-            Some(c) if *c != ')' => return Err(ParseError::MalformedProcedureDeclaration),
+            Some(';') => break,
+            Some(c) if c != ')' => return Err(ParseError::MalformedProcedureDeclaration),
             _ => break,
         }
     }
@@ -253,76 +264,53 @@ fn parse_instruction_list(iterator: &mut Peekable<Chars>, name: &str) -> Result<
     return Ok(anonymous_procedures);
 }
 
-fn parse_region(line: &str) -> Result<ParsedRegion, ParseError> {
-    let mut iterator: Peekable<Chars> = line.chars().peekable();
-    skip_whitespace(&mut iterator);
-    expect_keyword(&mut iterator, "region")?;
-    skip_whitespace(&mut iterator);
-    let name: String = parse_identifier(&mut iterator)?;
-    skip_whitespace(&mut iterator);
-    expect_keyword(&mut iterator, "[")?;
-    skip_whitespace(&mut iterator);
+fn parse_region(stream: &mut CharStream<File>) -> Result<ParsedRegion, ParseError> {
+    expect_keyword(stream, "region")?;
+    skip_whitespace(stream);
+    let name: String = parse_identifier(stream)?;
+    skip_whitespace(stream);
+    expect_keyword(stream, "[")?;
+    skip_whitespace(stream);
     // Again, I hate this. Sucks for me.
-    let size: NonZeroUsize = match NonZeroUsize::new(parse_number::<usize>(&mut iterator)?) {
+    let size: NonZeroUsize = match NonZeroUsize::new(parse_number::<usize>(stream)?) {
         Some(s) => s,
         None => return Err(ParseError::MalformedNumber),
     };
-    expect_keyword(&mut iterator, "]")?;
-    skip_whitespace(&mut iterator);
-    if iterator.peek().is_some() {
-        return Err(ParseError::MalformedRegionDeclaration);
-    }
+    expect_keyword(stream, "]")?;
+    skip_whitespace(stream);
+    expect_keyword(stream, ";")?;
     return Ok(ParsedRegion { name, size });
 }
 
-fn parse_procedure(line: &str) -> Result<Vec<ParsedProcedure>, ParseError> {
+fn parse_procedure(stream: &mut CharStream<File>) -> Result<Vec<ParsedProcedure>, ParseError> {
     let mut procedures: Vec<ParsedProcedure> = Vec::new();
-    let mut iterator: Peekable<Chars> = line.chars().peekable();
-    skip_whitespace(&mut iterator);
-    expect_keyword(&mut iterator, "proc")?;
-    skip_whitespace(&mut iterator);
-    let name: String = parse_identifier(&mut iterator)?;
-    expect_keyword(&mut iterator, ":")?;
-    let all_procedures: Vec<(String, Vec<ParsedInstruction>)> = parse_instruction_list(&mut iterator, &name)?;
+    expect_keyword(stream, "proc")?;
+    skip_whitespace(stream);
+    let name: String = parse_identifier(stream)?;
+    expect_keyword(stream, ":")?;
+    let all_procedures: Vec<(String, Vec<ParsedInstruction>)> = parse_instruction_list(stream, &name)?;
+    expect_keyword(stream, ";")?;
     for (name, instructions) in all_procedures.into_iter() {
         procedures.push(ParsedProcedure { name, instructions, is_anonymous: true });
     }
     // There is always at least one element
     procedures.last_mut().unwrap().is_anonymous = false;
-    if iterator.peek().is_some() {
-        return Err(ParseError::MalformedProcedureDeclaration);
-    }
     return Ok(procedures);
 }
 
-fn get_line_type(line: &str) -> LineType {
-    if line.is_empty() {
-        return LineType::Whitespace;
-    }
-    for c in line.chars() {
-        if !c.is_whitespace() {
-            match c {
-                'r' => return LineType::Region,
-                'p' => return LineType::Procedure,
-                '#' => return LineType::Comment,
-                _ => return LineType::Err,
-            }
-        }
-    }
-    return LineType::Whitespace;
-}
-
 pub fn parse(source_path: &Path) -> Result<ParseResult, ParseError> {
-    let reader: BufReader<File> = BufReader::new(File::open(source_path).map_err(|_| ParseError::MissingFile)?);
+    let stream: &mut CharStream<File> = &mut CharStream::new(File::open(source_path).map_err(|_| ParseError::MissingFile)?);
     let mut result: ParseResult = ParseResult::new();
-    for line in reader.lines() {
-        match line.map(|text| (get_line_type(&text), text)) {
-            Ok((LineType::Region, text)) => result.regions.push(parse_region(&text)?),
-            Ok((LineType::Procedure, text)) => result.procedures.append(&mut parse_procedure(&text)?),
-            Ok((LineType::Comment, _)) | Ok((LineType::Whitespace, _)) => continue,
-            Ok((LineType::Err, _)) => return Err(ParseError::MalformedLine),
-            Err(_) => return Err(ParseError::BadData),
+
+    skip_whitespace(stream);
+    while let Some(c) = stream.peek() {
+        match c {
+            'r' => result.regions.push(parse_region(stream)?),
+            'p' => result.procedures.append(&mut parse_procedure(stream)?),
+            '#' => skip_comment(stream),
+            _ => return Err(ParseError::MalformedLine),
         }
+        skip_whitespace(stream);
     }
 
     // Verify that all references are resolved before execution, to avoid runtime issues

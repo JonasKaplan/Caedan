@@ -3,10 +3,9 @@ use std::{cell::RefCell, collections::HashMap, io::{self, Read, Write}};
 use crate::{parser::ParsedInstruction, program::Call, region::Region};
 
 #[derive(Debug, Clone)]
-pub enum CalledRegion {
-    Undefined,
+pub enum RegionReference {
     BackReference,
-    Defined(String),
+    Named(String),
 }
 
 #[derive(Debug)]
@@ -21,9 +20,9 @@ pub enum Instruction {
     Read,
     Write,
     Quote(u8),
-    Send(String),
-    Receive(String),
-    Call(String, CalledRegion),
+    Send(RegionReference),
+    Receive(RegionReference),
+    Call(String, Option<RegionReference>),
 }
 
 #[derive(Debug)]
@@ -79,8 +78,8 @@ impl Procedure {
                 ParsedInstruction::Read => instructions.push(Instruction::Read),
                 ParsedInstruction::Write => instructions.push(Instruction::Write),
                 ParsedInstruction::Quote(value) => instructions.push(Instruction::Quote(*value)),
-                ParsedInstruction::Send(region_name) => instructions.push(Instruction::Send(region_name.to_string())),
-                ParsedInstruction::Receive(region_name) => instructions.push(Instruction::Receive(region_name.to_string())),
+                ParsedInstruction::Send(reference) => instructions.push(Instruction::Send(reference.clone())),
+                ParsedInstruction::Receive(reference) => instructions.push(Instruction::Receive(reference.clone())),
                 ParsedInstruction::Call(procedure, region) => instructions.push(Instruction::Call(procedure.to_string(), region.clone())),
             }
         }
@@ -127,31 +126,41 @@ impl Procedure {
                 // Same deal with the unwrap here
                 Instruction::Write => io::stdout().write_all(&[region.get()]).unwrap(),
                 Instruction::Quote(value) => region.set(*value),
-                Instruction::Send(region_name) => {
+                Instruction::Send(RegionReference::Named(region_name)) => {
                     if let Ok(mut reference) = regions.get(region_name).unwrap().try_borrow_mut() {
                         reference.set(region.get());
                     }
                 },
-                Instruction::Receive(region_name) => {
+                Instruction::Send(RegionReference::BackReference) => {
+                    if let Ok(mut reference) = regions.get(back_reference).unwrap().try_borrow_mut() {
+                        reference.set(region.get());
+                    }
+                },
+                Instruction::Receive(RegionReference::Named(region_name)) => {
                     if let Ok(reference) = regions.get(region_name).unwrap().try_borrow() {
                         region.set(reference.get());
                     }
                 },
-                Instruction::Call(procedure_name, CalledRegion::Undefined) => {
+                Instruction::Receive(RegionReference::BackReference) => {
+                    if let Ok(reference) = regions.get(back_reference).unwrap().try_borrow() {
+                        region.set(reference.get());
+                    }
+                },
+                Instruction::Call(procedure_name, None) => {
                     return Some(Call {
                         procedure: procedure_name.to_string(),
                         region: region.name.to_string(),
                         return_pointer,
                     });
                 },
-                Instruction::Call(procedure_name, CalledRegion::BackReference) => {
+                Instruction::Call(procedure_name, Some(RegionReference::BackReference)) => {
                     return Some(Call {
                         procedure: procedure_name.to_string(),
                         region: back_reference.to_string(),
                         return_pointer,
                     });
                 },
-                Instruction::Call(procedure_name, CalledRegion::Defined(region_name)) => {
+                Instruction::Call(procedure_name, Some(RegionReference::Named(region_name))) => {
                     return Some(Call {
                         procedure: procedure_name.to_string(),
                         region: region_name.to_string(),

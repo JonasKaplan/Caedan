@@ -1,5 +1,0 @@
-proc add: ^add>(>)@add^add<([>+<-]>)@add&add
-    region add[2]
-
-proc main: "20>"02<add.
-    region main[2]
