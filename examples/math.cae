@@ -1,25 +1,119 @@
-region res[1]
-region alu[2]
-region w_alu[5]
-    proc alu_suo: (~)@alu^alu
-    proc alu_sbo: (~)@alu^alu>(>)@alu^alu<(<)@alu
-    proc w_alu_sbo: (~<"00<"01~)@w_alu^w_alu>(>)@w_alu^w_alu<(<)@w_alu
+region alu[2];
+region alu_res[1];
 
-    proc add: alu_sbo([>+<-]>^res)@alu
-    proc sub: alu_sbo(>[-<->]<^res)@alu
+proc alu_suo:
+    (~ &$)@alu
+;
 
-    proc neg: alu_suo(>"01<[>"00<("00)@res"00]>[("01)@res"00])@alu
+proc alu_sbo:
+    (~ &$ >)@alu >
+    (&$ <)@alu <
+;
 
-    proc eq:  alu_sbo("01)@res([->-<]>[("00)@res"00])@alu
-    proc neq: alu_sbo("00)@res([->-<]>[("01)@res"00])@alu
-    proc lte: w_alu_sbo("00)@res(>>>[~eq>>&res[>"00<("01)@res"00]>[~+>>>"00~[>>>"01~<]~<]<])@w_alu
-    proc gte: w_alu_sbo("00)@res(>>>[~eq>>&res[>"00<("01)@res"00]>[~->>>"00~[>>>"01~<]~<]<])@w_alu
-    proc lt:  gte neg@res
-    proc gt:  lte neg@res
+proc add:
+    alu_sbo
+    ([>+<-] >^alu_res)@alu
+;
 
-region io[2]
-    proc read_digit: (~,>,"30<sub&res)@io&io
-    proc print_byte: ^io(~>"0A<gte>&res["31."0A<sub&res>"00]"30<add&res.)@io
+proc sub:
+    alu_sbo
+    (>[-<->] <^alu_res)@alu
+;
 
-proc main: read_digit>read_digit<add&res print_byte
-    region main[2]
+proc neg:
+    alu_suo
+    ("01)@alu_res
+    ([("00)@alu_res "00])@alu
+;
+
+proc eq:
+    alu_sbo
+    ("01)@alu_res
+    (
+        [->-<] >
+        [("00)@alu_res "00]
+    )@alu
+;
+
+proc neq:
+    alu_sbo
+    ("00)@alu_res
+    (
+        [->-<] >
+        [("01)@alu_res "00]
+    )@alu
+;
+
+region clu[4];
+region clu_res[1];
+
+proc clu_sbo:
+    (~ &$ >)@clu >
+    (&$ <)@clu <
+;
+
+proc lte:
+    clu_sbo
+    ("00)@clu_res
+    (
+        [
+            eq >> &alu_res > "01 <
+            [> "00 < ("01)@clu_res ~ "00 >> "00]
+            >
+            [~ + >> "00]
+            ~
+        ]
+    )@clu
+;
+
+proc gte:
+    clu_sbo
+    ("00)@clu_res
+    (
+        [
+            eq >> &alu_res > "01 <
+            [> "00 < ("01)@clu_res ~ "00 >> "00]
+            >
+            [~ - >> "00]
+            ~
+        ]
+    )@clu
+;
+
+proc lt:
+    gte
+    neg@clu_res
+    (^clu_res)@alu_res
+;
+
+proc gt:
+    lte
+    neg@clu_res
+    (^clu_res)@alu_res
+;
+
+region io[2];
+region io_res[1];
+
+proc read_digit:
+    (~ , > , "30 < sub (&alu_res)@io_res)@io
+;
+
+proc print_byte:
+    ^io
+    (
+        ~> "0A < gte > &alu_res
+        ["31."0A < sub &alu_res > "00]
+        "30 < add &alu_res.
+    )@io
+;
+
+region main[2];
+
+# Takes in two one-digit numbers and prints the result to stdout
+proc main:
+    read_digit &io_res >
+    read_digit &io_res <
+    add &alu_res
+    print_byte
+;

@@ -33,18 +33,20 @@ pub enum ParsedInstruction {
     Call(String, Option<RegionReference>),
 }
 
+#[derive(Debug)]
 pub struct ParsedRegion {
     pub name: String,
     pub size: NonZeroUsize,
 }
 
+#[derive(Debug)]
 pub struct ParsedProcedure {
     pub name: String,
     pub is_anonymous: bool,
     pub instructions: Vec<ParsedInstruction>,
 }
 
-
+#[derive(Debug)]
 pub struct ParseResult {
     pub regions: Vec<ParsedRegion>,
     pub procedures: Vec<ParsedProcedure>,
@@ -221,7 +223,10 @@ fn parse_instruction(stream: &mut CharStream<File>) -> Result<ParsedInstruction,
             let procedure: String = parse_identifier(stream)?;
             skip_whitespace(stream);
             match stream.peek() {
-                Some('@') => return Ok(ParsedInstruction::Call(procedure, Some(parse_region_reference(stream)?))),
+                Some('@') => {
+                    stream.advance();
+                    return Ok(ParsedInstruction::Call(procedure, Some(parse_region_reference(stream)?)));
+                }
                 _ => return Ok(ParsedInstruction::Call(procedure, None)),
             }
         },
@@ -245,13 +250,16 @@ fn parse_instruction_list(stream: &mut CharStream<File>, name: &str) -> Result<V
             Some(c) if is_instruction_char(c) => instructions.push(parse_instruction(stream)?),
             Some('(') => {
                 stream.advance();
-                anonymous_count += 1;
                 let anonymous_name = make_anonymous_name(name, anonymous_count);
                 anonymous_procedures.append(&mut parse_instruction_list(stream, &anonymous_name)?);
+                anonymous_count += 1;
                 stream.advance();
                 skip_whitespace(stream);
                 match stream.peek() {
-                    Some('@') => instructions.push(ParsedInstruction::Call(anonymous_name, Some(parse_region_reference(stream)?))),
+                    Some('@') => {
+                        stream.advance();
+                        instructions.push(ParsedInstruction::Call(anonymous_name, Some(parse_region_reference(stream)?)));
+                    }
                     _ => instructions.push(ParsedInstruction::Call(anonymous_name, None)),
                 }
             },
