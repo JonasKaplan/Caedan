@@ -1,5 +1,5 @@
 proc zero: [^zero"00>&zero-]
-    region zero: [1]
+    region zero[1]
 
 proc main: "64
-    region main: [100]
+    region main[100]

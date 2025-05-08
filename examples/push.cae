@@ -1,5 +1,5 @@
 proc push: ^push>&push<
-    region push: [1]
+    region push[1]
 
 proc main: "30push>.
-    region main: [2]
+    region main[2]

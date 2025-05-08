@@ -251,8 +251,6 @@ fn parse_region(line: &str) -> Result<ParsedRegion, ParseError> {
     skip_whitespace(&mut iterator);
     let name: String = parse_identifier(&mut iterator)?;
     skip_whitespace(&mut iterator);
-    expect_keyword(&mut iterator, ":")?;
-    skip_whitespace(&mut iterator);
     expect_keyword(&mut iterator, "[")?;
     skip_whitespace(&mut iterator);
     // Again, I hate this. Sucks for me.

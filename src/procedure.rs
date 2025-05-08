@@ -83,11 +83,15 @@ impl Procedure {
     }
 
     pub fn execute(&self, region: &mut Region, mut pointer: usize, regions: &HashMap<String, RefCell<Region>>) -> Option<Call> {
+        //println!("{} @ {}", self.name, region.name);
         if (pointer == 0) && (self.instructions.is_empty()) {
             return None;
         }
         let mut return_pointer: Option<usize>;
         loop {
+            if self.name.starts_with("lte") || self.name.starts_with("eq") {
+                //println!("({}): {:?}", self.name, region);
+            }
             match &self.instructions[pointer] {
                 Instruction::LoopStart(location) if region.get() == 0 => pointer = *location,
                 Instruction::LoopEnd(location) if region.get() != 0 => pointer = *location,

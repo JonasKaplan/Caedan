@@ -1,0 +1,25 @@
+region res[1]
+region alu[2]
+region w_alu[5]
+    proc alu_suo: (~)@alu^alu
+    proc alu_sbo: (~)@alu^alu>(>)@alu^alu<(<)@alu
+    proc w_alu_sbo: (~<"00<"01~)@w_alu^w_alu>(>)@w_alu^w_alu<(<)@w_alu
+
+    proc add: alu_sbo([>+<-]>^res)@alu
+    proc sub: alu_sbo(>[-<->]<^res)@alu
+
+    proc neg: alu_suo(>"01<[>"00<("00)@res"00]>[("01)@res"00])@alu
+
+    proc eq:  alu_sbo("01)@res([->-<]>[("00)@res"00])@alu
+    proc neq: alu_sbo("00)@res([->-<]>[("01)@res"00])@alu
+    proc lte: w_alu_sbo("00)@res(>>>[~eq>>&res[>"00<("01)@res"00]>[~+>>>"00~[>>>"01~<]~<]<])@w_alu
+    proc gte: w_alu_sbo("00)@res(>>>[~eq>>&res[>"00<("01)@res"00]>[~->>>"00~[>>>"01~<]~<]<])@w_alu
+    proc lt:  gte neg@res
+    proc gt:  lte neg@res
+
+region io[2]
+    proc read_digit: (~,>,"30<sub&res)@io&io
+    proc print_byte: ^io(~>"0A<gte>&res["31."0A<sub&res>"00]"30<add&res.)@io
+
+proc main: read_digit>read_digit<add&res print_byte
+    region main[2]
