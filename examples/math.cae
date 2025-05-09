@@ -1,3 +1,5 @@
+# The results of all operations are placed in the corresponding `_res` region
+
 region alu[2];
 region alu_res[1];
 
