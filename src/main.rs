@@ -1,15 +1,14 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::unused_unit)]
 
-mod char_stream;
 mod procedure;
 mod region;
-mod program;
+mod interpreter;
 mod parser;
 
 use std::path::PathBuf;
 
-use program::Program;
+use interpreter::program::Program;
 
 fn main() {
     let program: Program = Program::from_source(&PathBuf::from("examples/math.cae")).unwrap();

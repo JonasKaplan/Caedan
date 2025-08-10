@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fs::File, num::NonZeroUsize, path::Path, str::FromStr};
 
-use crate::{char_stream::CharStream, procedure::RegionReference};
+use crate::{parser::char_stream::CharStream, procedure::RegionReference};
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -68,7 +68,7 @@ impl ParseResult {
 }
 
 impl ParsedProcedure {
-    pub fn get_all_references(&self) -> Vec<ReferencedItem> {
+    pub fn get_all_references(&self) -> Vec<ReferencedItem<'_>> {
         let mut references: Vec<ReferencedItem> = Vec::new();
         for instruction in &self.instructions {
             match instruction {

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::{HashMap, VecDeque}, path::Path};
 
-use crate::{parser::{parse, ParseResult, ParseError}, procedure::Procedure, region::Region};
+use crate::{parser::parser::{parse, ParseResult, ParseError}, procedure::Procedure, region::Region};
 
 #[derive(Debug)]
 pub struct Program {
